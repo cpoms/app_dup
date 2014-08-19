@@ -1,68 +1,10 @@
 require 'deep_cloneable'
 
 module AppDup
-  class Duper
-    # TODO: bring in AR-import for performance!
+  module Duper
+    DEFAULT_DUP_OPTIONS = { models: :all, exclusions: [] }
 
-    attr_accessor :from, :to, :options, :data, :results, :models
-
-    DEFAULT_OPTIONS     = { create_db: false }
-    DEFAULT_DUP_OPTIONS = { models: :all, exclusions: nil }
-
-    def initialize(options)
-      if (options.keys & [:from, :to]).size != 2
-        raise "must provide `from` and `to` options for initialization"
-      end
-
-      @from = options.delete(:from)
-      @to = options.delete(:to)
-
-      @options = options.reverse_merge!(DEFAULT_OPTIONS)
-    end
-
-    def run
-      # 1. connect to old DB
-      connect_to(@from)
-      # 2. copy EVERYTHING into memory... x_x
-      @data = Duper.dup
-      # 3. create new db?
-      create_db(@to) unless options[:create_db]
-      # 4. connect to the new DB
-      connect_to(@to)
-      # 5. transform the data however required
-      transform
-      # before_dump hook!
-      before_dump
-      # 5. save all the data! and do it in a transaction so we don't end up with
-      # fragmented data if it cacks out with an exception
-      ActiveRecord::Base.transaction do
-        # DUUUUUMPPPP.
-        @results = @data.map do |model_name, (_, dups)|
-          [model_name, dups.map(&:save)]
-        end
-        # do something if errors? :/
-      end
-      # after_dump hook!
-      after_dump
-      # count of the `save` return values.. lame
-      return @results.inject({}){|h,(m,r)| h[m] = r.size}
-    ensure
-      # don't leave the user connected to some other database,
-      # ensure we reconnect to the environment db
-      connect_to(ENV['RAILS_ENV'])
-    end
-
-    def transform
-      logger.info("`transform` not implemented")
-    end
-
-    def before_dump
-    end
-
-    def after_dump
-    end
-
-    def self.dup(opts = {})
+    def dup(opts = {})
       sanitize_args(opts, DEFAULT_DUP_OPTIONS.keys, raise: true)
       opts.reverse_merge!(DEFAULT_DUP_OPTIONS)
 
@@ -91,7 +33,7 @@ module AppDup
       return dict
     end
 
-    def self.build_tree(models, opts = {})
+    def build_tree(models, opts = {})
       analysed = []
       tree = {}
       models.each do |m|
@@ -101,7 +43,7 @@ module AppDup
     end
 
     private
-      def self.discover(model, exclusions = [], analysed)
+      def discover(model, exclusions = [], analysed)
         belongs_to_reflections = model.reflect_on_all_associations(:belongs_to)
         habtm_reflections = model.reflect_on_all_associations(:has_and_belongs_to_many)
         excluded_associations = (exclusions.find{|e| e.is_a?(Hash) && e.key?(:model)} || {})[model] || []
@@ -124,25 +66,12 @@ module AppDup
         end
       end
 
-      def self.sanitize_args(hash, keys, opts = {})
+      def sanitize_args(hash, keys, opts = {})
         unrecognised_keys = hash.keys - keys
         if opts[:raise] && unrecognised_keys.any?
           raise ArgumentError, "Unrecognised keys: #{unrecognised_keys}"
         end
         hash.except!(unrecognised_keys)
-      end
-
-      def connect_to(db)
-        # establish_connection takes an env name or a hash config so, so do we!
-        ActiveRecord::Base.establish_connection(db)
-        reload_schema
-      end
-
-      def reload_schema
-        # Reset column information for all our models
-        ActiveRecord::Base.descendants.each do |model|
-          model.reset_column_information
-        end
       end
   end
 end
