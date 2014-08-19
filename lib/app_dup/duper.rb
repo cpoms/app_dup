@@ -7,7 +7,7 @@ module AppDup
     attr_accessor :from, :to, :options, :data, :results, :models
 
     DEFAULT_OPTIONS     = { create_db: false }
-    DEFAULT_DUP_OPTIONS = { models: :all }
+    DEFAULT_DUP_OPTIONS = { models: :all, exclusions: nil }
 
     def initialize(options)
       if (options.keys & [:from, :to]).size != 2
@@ -69,6 +69,7 @@ module AppDup
       case opts[:models]
       when :all
         models = ActiveRecord::Base.descendants
+        models.reject!{|m| opts[:exclusions].include?(m.name.underscore.pluralize.to_sym)}
       when Array
         models = opts[:models].map do |m|
           m = m.to_s.classify.constantize unless m.is_a?(Class)
@@ -94,18 +95,19 @@ module AppDup
       analysed = []
       tree = {}
       models.each do |m|
-        tree[m] = discover(m, opts[:exclude_associations], analysed)
+        tree[m] = discover(m, opts[:exclusions], analysed)
       end
       tree
     end
 
     private
-      def self.discover(model, exclusions = {}, analysed)
+      def self.discover(model, exclusions = [], analysed)
         belongs_to_reflections = model.reflect_on_all_associations(:belongs_to)
         habtm_reflections = model.reflect_on_all_associations(:has_and_belongs_to_many)
-        model_exclusions = exclusions[model.name.underscore.to_sym] || []
+        excluded_associations = (exclusions.find{|e| e.is_a?(Hash) && e.key?(:model)} || {})[model] || []
         reflections = (belongs_to_reflections + habtm_reflections).reject do |r|
-          model_exclusions.include?(r.name)
+          exclusions.include?(r.klass.name.underscore.pluralize.to_sym) ||
+            excluded_associations.include?(r.name)
         end
         analysed << model
 
