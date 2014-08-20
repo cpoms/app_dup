@@ -24,8 +24,6 @@ module AppDup
 
       tree.each do |model, dup_hash|
         model.all.each.map do |i|
-          # TODO: hack deep_cloneable not to duplicate associations
-          # for dictionary items..
           i.dup include: dup_hash, dup_habtm: true, dictionary: dict
         end
       end

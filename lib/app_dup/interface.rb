@@ -3,11 +3,13 @@ require "app_dup/duper"
 module AppDup
   module Interface
     # TODO: bring in AR-import for performance!
-    include Duper
-
     attr_accessor :from, :to, :options, :data, :results, :models
 
     DEFAULT_OPTIONS = { create_db: false }
+
+    def self.included(base)
+      base.extend(Duper)
+    end
 
     def initialize(options)
       if (options.keys & [:from, :to]).size != 2
@@ -20,40 +22,40 @@ module AppDup
       @options = options.reverse_merge!(DEFAULT_OPTIONS)
     end
 
-    def run
-      # 1. connect to old DB
+    def run!
+      puts "STARTING"
       connect_to(@from)
-      # 2. copy EVERYTHING into memory... x_x
-      @data = dup
-      # 3. create new db?
-      create_db(@to) unless options[:create_db]
-      # 4. connect to the new DB
+      puts "CONNECTED TO FROM, DUPING"
+      @data = Duper.dup(options[:dup] || {})
+      puts "DUPED"
+      create_db(@to) if options[:create_db]
       connect_to(@to)
-      # 5. transform the data however required
+      puts "CONNECTED TO TO"
       transform
-      # before_dump hook!
+      puts "TRANSFORMED"
       before_dump
-      # 5. save all the data! and do it in a transaction so we don't end up with
-      # fragmented data if it cacks out with an exception
+      puts "STARTING DUMP"
+      sleep(20)
       ActiveRecord::Base.transaction do
         # DUUUUUMPPPP.
-        @results = @data.map do |model_name, (_, dups)|
-          [model_name, dups.map(&:save)]
+        @results = @data.map do |model_name, h|
+          len = h.values.size
+          [model_name, h.values.with_index.map do |d,i|
+            puts "saving #{model_name} #{i} of #{len}"
+            d.save
+          end]
         end
         # do something if errors? :/
       end
-      # after_dump hook!
+      puts "FINISHED DUMP"
       after_dump
-      # count of the `save` return values.. lame
       return @results.inject({}){|h,(m,r)| h[m] = r.size}
     ensure
-      # don't leave the user connected to some other database,
-      # ensure we reconnect to the environment db
       connect_to(ENV['RAILS_ENV'])
     end
 
     def transform
-      logger.info("`transform` not implemented")
+      puts "`transform` not implemented"
     end
 
     def before_dump
